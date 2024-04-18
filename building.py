@@ -43,8 +43,8 @@ async def login():
 
         # Step 2: Submit login credentials
         login_data = {
-            'name': config['username'],
-            'password': config['password']
+            'name': 'scar',
+            'password': 'satkabir'
         }
         response = await client.post(base_url, data=login_data, headers=headers)
         if "Login failed" in response.text:
@@ -89,42 +89,43 @@ async def login():
         logger.info("Successfully logged in and accessed the game page")
         # Return the cookies from the new client instance
         return client.cookies
+
+
     
-    
+
 async def construct_and_upgrade_building(cookies, village_id, building_id, loops):
     async with httpx.AsyncClient(cookies=cookies) as client:
         for _ in range(loops):
-            # Step 1: Access the construction page for the building
-            response = await client.get(f"{base_url}/build.php?id={village_id}")
-            if response.status_code != 200:
-                logging.error(f"Failed to access the construction page for village ID {village_id}")
-                continue
+            try:
+                construction_page_url = f"https://fun.gotravspeed.com/build.php?id={village_id}"
+                response = await client.get(construction_page_url)
+                if response.status_code != 200:
+                    logging.error(f"Failed to access the construction page at {construction_page_url}. Status code: {response.status_code}")
+                    continue
 
-            # Step 2: Parse the response to extract the CSRF token and check if the building is fully upgraded
-            soup = BeautifulSoup(response.text, 'html.parser')
-            build_link = soup.find('a', class_='build')
-            if not build_link:
-                logging.warning(f"Construction link not found for village ID {village_id}, building ID {building_id}. Skipping...")
-                return  # Skip the current iteration and continue with the next one
-            href = build_link['href']
-            csrf_token = href.split('&k=')[-1]
+                soup = BeautifulSoup(response.text, 'html.parser')
+                build_link = soup.find('a', class_='build')
+                if not build_link:
+                    logging.warning(f"Construction link not found for village ID {village_id}, building ID {building_id}.")
+                    continue
 
-            # Check if any building is fully upgraded
-            upgrade_message = soup.find('p', class_='none')
-            if upgrade_message:
-                message_words = upgrade_message.text.split()
-                if len(message_words) >= 3 and message_words[0] == "Updated" and message_words[-1] == "Fully":
-                    building_name = " ".join(message_words[1:-1])  # Join all words except the first and last
-                    logging.info(f"{building_name} is fully upgraded. Skipping...")
+                href = build_link['href']
+                csrf_token = href.split('&k=')[-1]
+
+                upgrade_message = soup.find('p', class_='none')
+                if upgrade_message and "Fully Updated" in upgrade_message.text:
+                    logging.info(f"Building ID {building_id} in village ID {village_id} is fully upgraded.")
                     break
 
-            # Step 3: Make a request to construct or upgrade the building
-            construct_url = f"{base_url}/village2.php?id={village_id}&b={building_id}&k={csrf_token}"
-            response = await client.get(construct_url)
-            if response.status_code == 200:
-                logging.info(f"Successfully constructed/upgraded building ID {building_id} in village ID {village_id}")
-            else:
-                logging.error(f"Failed to construct/upgrade building ID {building_id} in village ID {village_id}")
+                construct_url = f"https://fun.gotravspeed.com/village2.php?id={village_id}&b={building_id}&k={csrf_token}"
+                response = await client.get(construct_url)
+                if response.status_code != 200:
+                    logging.error(f"Failed to construct/upgrade at {construct_url}. Status code: {response.status_code}")
+                else:
+                    logging.info(f"Successfully constructed/upgraded building ID {building_id} at {construct_url}")
+            except Exception as e:
+                logging.error(f"An error occurred during the construction/upgrade process: {str(e)}")
+
 
 async def construct_and_upgrade_villages(cookies):
     for village_type in config["buidling"]:
@@ -249,8 +250,10 @@ async def construct_secondary(cookies, village_id):
 
 
 async def main():
-    async with httpx.AsyncClient(headers=headers) as client:
-        if not await login(client):
+    try:
+        cookies = await login()  # Login and get cookies
+        if not cookies:
+            print("Login failed.")
             return
         
         print("Choose an action: 1: Capital, 2: Artefact, 3: Secondary")
@@ -258,15 +261,17 @@ async def main():
 
         if choice == '1':
             village_id = input("Enter the village ID for the capital: ")
-            await construct_capital(client, village_id)
+            await construct_capital(cookies, village_id)
         elif choice == '2':
             village_id = input("Enter the village ID for the artefact: ")
-            await construct_artefact(client, village_id)
+            await construct_artefact(cookies, village_id)
         elif choice == '3':
             village_id = input("Enter the village ID for secondary buildings: ")
-            await construct_secondary(client, village_id)
+            await construct_secondary(cookies, village_id)
         else:
             print("Invalid choice.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
 
 if __name__ == '__main__':
     asyncio.run(main())
